@@ -95,9 +95,8 @@ def identify_currency(symbol):
     return "TWD" if (".TW" in symbol or ".TWO" in symbol) else "USD"
 
 # ==========================================
-# 技術分析邏輯 (Tab 2) - EMA, ADX, ATR 實作
+# 技術分析邏輯 (Tab 2)
 # ==========================================
-
 def calculate_rsi(series, period=14):
     delta = series.diff()
     gain = (delta.where(delta > 0, 0)).rolling(window=period).mean()
@@ -106,132 +105,71 @@ def calculate_rsi(series, period=14):
     return 100 - (100 / (1 + rs))
 
 def calculate_ema(series, period):
-    """計算 EMA"""
     return series.ewm(span=period, adjust=False).mean()
 
 def calculate_adx_atr(df, period=14):
-    """計算 ATR 和 ADX"""
     df_ta = df.copy()
-
-    # True Range (TR)
     df_ta['H-L'] = df_ta['High'] - df_ta['Low']
     df_ta['H-PC'] = np.abs(df_ta['High'] - df_ta['Close'].shift(1))
     df_ta['L-PC'] = np.abs(df_ta['Low'] - df_ta['Close'].shift(1))
     df_ta['TR'] = df_ta[['H-L', 'H-PC', 'L-PC']].max(axis=1)
-
-    # ATR (EMA Smoothing of TR)
     df_ta['ATR'] = df_ta['TR'].ewm(span=period, adjust=False).mean()
-
-    # Directional Movement (DM)
     df_ta['+DM'] = 0.0
     df_ta['-DM'] = 0.0
-
     high_diff = df_ta['High'] - df_ta['High'].shift(1)
     low_diff = df_ta['Low'].shift(1) - df_ta['Low']
-
     df_ta.loc[high_diff > low_diff, '+DM'] = np.maximum(high_diff, 0)
     df_ta.loc[low_diff > high_diff, '-DM'] = np.maximum(low_diff, 0)
-
-    # Smooth DM's (using EMA)
     df_ta['+DM_EMA'] = df_ta['+DM'].ewm(span=period, adjust=False).mean()
     df_ta['-DM_EMA'] = df_ta['-DM'].ewm(span=period, adjust=False).mean()
-    
-    # Directional Indicator (DI)
     df_ta['+DI'] = (df_ta['+DM_EMA'] / df_ta['ATR']) * 100
     df_ta['-DI'] = (df_ta['-DM_EMA'] / df_ta['ATR']) * 100
-    
-    # Directional Movement Index (DX)
-    # 避免分母為零，將無限大替換為 nan 後再填補
     sum_di = df_ta['+DI'] + df_ta['+DI']
     df_ta['DX'] = (np.abs(df_ta['+DI'] - df_ta['-DI']) / sum_di) * 100
     df_ta['DX'] = df_ta['DX'].replace([np.inf, -np.inf], np.nan).fillna(0) 
-
-    # Average Directional Index (ADX)
     df_ta['ADX'] = df_ta['DX'].ewm(span=period, adjust=False).mean()
-    
     return df_ta['ADX'], df_ta['ATR']
 
 def analyze_stock_technical(symbol):
     try:
-        # 抓取 3 年週線資料，以確保 ADX/ATR 計算的穩定性
         stock = yf.Ticker(symbol)
         df = stock.history(period="3y", interval="1wk")
-        
-        if df.empty:
-            return None, "無法獲取歷史資料"
-
-        # 針對圖表顯示，只取最近半年的數據
-        df_chart = df.tail(26).copy() 
-
+        if df.empty: return None, "無法獲取歷史資料"
+        df_recent = df.tail(26).copy() 
         current_price = df['Close'].iloc[-1]
-        
-        # 支撐與壓力 (過去半年高低點) - 基於 df_chart
-        high_6m = df_chart['High'].max()
-        low_6m = df_chart['Low'].min()
-        
-        # 移動平均 (20週 SMA)
+        high_6m = df_recent['High'].max()
+        low_6m = df_recent['Low'].min()
         ma_20 = df['Close'].rolling(window=20).mean().iloc[-1]
-        
-        # RSI (14週)
         rsi_curr = calculate_rsi(df['Close'], 14).iloc[-1]
-
-        # 計算新的指標
         ema_12_curr = calculate_ema(df['Close'], period=12).iloc[-1]
         adx_series, atr_series = calculate_adx_atr(df, period=14)
         adx_curr = adx_series.iloc[-1]
         atr_curr = atr_series.iloc[-1]
-
-        # 策略判定 (簡單邏輯)
         trend = "多頭排列 🐂" if current_price > ma_20 else "空頭/整理 🐻"
-        
-        entry_price = max(low_6m * 1.02, ma_20) 
+        entry_price = max(low_6m * 1.02, ma_20)
         exit_price = high_6m * 0.98
-
-        # 綜合建議 (加入 ADX 判斷)
-        if rsi_curr > 70:
-            advice = "過熱，建議分批獲利了結"
-            color = "red"
-        elif rsi_curr < 30:
-            advice = "超賣，可考慮分批佈局"
-            color = "green"
-        elif current_price > ma_20:
-            advice = "趨勢向上，持股續抱"
-            color = "orange"
-        else:
-            advice = "趨勢偏弱，觀望或區間操作"
-            color = "gray"
         
-        # ADX 趨勢強度評估
+        if rsi_curr > 70: advice, color = "過熱，建議分批獲利", "red"
+        elif rsi_curr < 30: advice, color = "超賣，可考慮分批佈局", "green"
+        elif current_price > ma_20: advice, color = "趨勢向上，持股續抱", "orange"
+        else: advice, color = "趨勢偏弱，觀望或區間操作", "gray"
+        
         trend_strength_advice = ""
-        if adx_curr > 25:
-            trend_strength_advice = f"目前趨勢強勁 (ADX: {adx_curr:.1f})，適合順勢操作。"
-        elif adx_curr < 20:
-            trend_strength_advice = f"目前趨勢不明顯，處於盤整 (ADX: {adx_curr:.1f})，不適合追價。"
-        else: # 20 <= ADX <= 25
-            trend_strength_advice = f"目前趨勢存在但強度一般 (ADX: {adx_curr:.1f})。"
+        if adx_curr > 25: trend_strength_advice = f"目前趨勢強勁 (ADX: {adx_curr:.1f})，適合順勢操作。"
+        elif adx_curr < 20: trend_strength_advice = f"目前趨勢不明顯，處於盤整 (ADX: {adx_curr:.1f})，不適合追價。"
+        else: trend_strength_advice = f"目前趨勢存在但強度一般 (ADX: {adx_curr:.1f})。"
 
-        # 更新圖表數據 (將 EMA 加入圖表)
-        df_chart['20週均線'] = df['Close'].rolling(window=20).mean().loc[df_chart.index]
-        df_chart['12週EMA'] = calculate_ema(df['Close'], period=12).loc[df_chart.index]
+        df_recent['20週均線'] = df['Close'].rolling(window=20).mean().loc[df_recent.index]
+        df_recent['12週EMA'] = calculate_ema(df['Close'], period=12).loc[df_recent.index]
 
         return {
-            "current_price": current_price,
-            "high_6m": high_6m,
-            "low_6m": low_6m,
-            "ma_20": ma_20,
-            "rsi": rsi_curr,
-            "ema_12": ema_12_curr,
-            "adx": adx_curr,
-            "atr": atr_curr,
-            "trend": trend,
-            "entry_target": entry_price,
-            "exit_target": exit_price,
-            "advice": advice,
-            "advice_color": color,
-            "trend_strength_advice": trend_strength_advice, # 新增
-            "history_df": df_chart # 圖表數據
+            "current_price": current_price, "high_6m": high_6m, "low_6m": low_6m,
+            "ma_20": ma_20, "rsi": rsi_curr, "ema_12": ema_12_curr,
+            "adx": adx_curr, "atr": atr_curr, "trend": trend,
+            "entry_target": entry_price, "exit_target": exit_price,
+            "advice": advice, "advice_color": color,
+            "trend_strength_advice": trend_strength_advice, "history_df": df_recent
         }, None
-
     except Exception as e:
         return None, str(e)
 
@@ -250,37 +188,29 @@ def perform_portfolio_analysis(portfolio_df):
             hist_data = hist_data.to_frame(name=symbols[0])
             
         hist_data = hist_data.dropna(how='all')
-        
         returns = hist_data.pct_change().dropna()
         corr_matrix = returns.corr()
         
         performance_list = []
-        
         for symbol in hist_data.columns:
             try:
                 series = hist_data[symbol].dropna()
                 if len(series) < 20: continue 
                 
                 daily_rets = series.pct_change().dropna()
-                
                 days_diff = (series.index[-1] - series.index[0]).days
                 years = days_diff / 365.25
-                #total_return = (series.iloc[-1] / series.iloc[0]) - 1 # 未用到
+                # total_return = (series.iloc[-1] / series.iloc[0]) - 1
                 cagr = ((series.iloc[-1] / series.iloc[0]) ** (1/years)) - 1 if years > 0 else 0
-                
                 stdev = daily_rets.std() * np.sqrt(252)
-                
                 mean_ret = daily_rets.mean() * 252
                 sharpe = mean_ret / stdev if stdev != 0 else 0
-                
                 negative_rets = daily_rets[daily_rets < 0]
                 downside_std = negative_rets.std() * np.sqrt(252)
                 sortino = mean_ret / downside_std if downside_std != 0 else 0
                 
                 annual_prices = series.resample('YE').last()
-                if len(annual_prices) < 2:
-                     best_year = cagr # 如果只有一年資料，最佳最差都當作 CAGR
-                     worst_year = cagr
+                if len(annual_prices) < 2: best_year = cagr; worst_year = cagr
                 else:
                     annual_rets = series.resample('YE').apply(lambda x: (x.iloc[-1]/x.iloc[0])-1)
                     best_year = annual_rets.max()
@@ -288,24 +218,21 @@ def perform_portfolio_analysis(portfolio_df):
 
                 performance_list.append({
                     "股票代號": symbol,
-                    "CAGR (%)": cagr * 100,      # 修正：乘 100
-                    "年化波動率 (%)": stdev * 100, # 修正：乘 100
-                    "Best Year (%)": best_year * 100, # 修正：乘 100
-                    "Worst Year (%)": worst_year * 100, # 修正：乘 100
+                    "CAGR (%)": cagr * 100,
+                    "年化波動率 (%)": stdev * 100,
+                    "Best Year (%)": best_year * 100,
+                    "Worst Year (%)": worst_year * 100,
                     "Sharpe Ratio": sharpe,
                     "Sortino Ratio": sortino
                 })
-            except Exception as e:
-                pass 
+            except Exception as e: pass 
 
         perf_df = pd.DataFrame(performance_list)
-
         suggestions = []
         total_val = portfolio_df["現值(TWD)"].sum()
         for idx, row in portfolio_df.iterrows():
             weight = row["現值(TWD)"] / total_val
-            if weight > 0.3:
-                suggestions.append(f"⚠️ **集中度風險**：{row['股票代號']} 佔比達 {weight*100:.1f}%，建議適度減碼。")
+            if weight > 0.3: suggestions.append(f"⚠️ **集中度風險**：{row['股票代號']} 佔比達 {weight*100:.1f}%，建議適度減碼。")
         
         cols = corr_matrix.columns
         high_corr_pairs = []
@@ -314,15 +241,11 @@ def perform_portfolio_analysis(portfolio_df):
                 c = corr_matrix.iloc[i, j]
                 if c > 0.8: high_corr_pairs.append(f"{cols[i]} & {cols[j]}")
         
-        if high_corr_pairs:
-            suggestions.append(f"🔗 **連動風險**：以下股票走勢高度相關 (>0.8)：" + ", ".join(high_corr_pairs))
-        
+        if high_corr_pairs: suggestions.append(f"🔗 **連動風險**：以下股票走勢高度相關 (>0.8)：" + ", ".join(high_corr_pairs))
         if not suggestions: suggestions.append("✅ 投資組合配置健康，無明顯集中或連動風險。")
 
         return {
-            "corr_matrix": corr_matrix,
-            "suggestions": suggestions,
-            "perf_df": perf_df
+            "corr_matrix": corr_matrix, "suggestions": suggestions, "perf_df": perf_df
         }, None
 
     except Exception as e:
@@ -502,8 +425,29 @@ with tab1:
             else: df_pie_filtered = portfolio
 
             if not df_pie_filtered.empty:
+                # 1. 計算該範圍的總報酬率
+                sub_cost = df_pie_filtered["總投入成本(TWD)"].sum()
+                sub_val = df_pie_filtered["現值(TWD)"].sum()
+                sub_profit = sub_val - sub_cost
+                sub_roi = (sub_profit / sub_cost * 100) if sub_cost > 0 else 0
+                
+                # 2. 決定顏色 (紅漲綠跌)
+                roi_color = "red" if sub_roi > 0 else "green"
+
                 fig2 = px.pie(df_pie_filtered, values="現值(TWD)", names="股票代號", title=None, hole=0.4)
                 fig2.update_traces(textinfo='percent+label')
+                
+                # 3. 在中心加入文字
+                fig2.update_layout(
+                    annotations=[dict(
+                        text=f"總報酬<br>{sub_roi:+.2f}%", 
+                        x=0.5, y=0.5, 
+                        font_size=20, 
+                        showarrow=False,
+                        font_color=roi_color
+                    )]
+                )
+                
                 st.plotly_chart(fig2, use_container_width=True)
             else: st.info(f"無 {filter_option} 資料")
 
@@ -546,38 +490,28 @@ with tab2:
                 result, error = analyze_stock_technical(selected_stock)
                 if error: st.error(error)
                 else:
-                    # 第一行指標
                     c1, c2, c3, c4 = st.columns(4)
                     c1.metric("目前價格", f"{result['current_price']:.2f}")
                     c2.metric("半年高 (壓力)", f"{result['high_6m']:.2f}")
                     c3.metric("半年低 (支撐)", f"{result['low_6m']:.2f}")
                     c4.metric("RSI 指標", f"{result['rsi']:.1f}")
-
-                    # 第二行指標 (新增)
+                    
                     c5, c6, c7, c8 = st.columns(4)
                     c5.metric("12週EMA", f"{result['ema_12']:.2f}")
                     c6.metric("ADX (14週)", f"{result['adx']:.1f}")
                     c7.metric("ATR (14週)", f"{result['atr']:.2f}")
-                    # c8 留空或新增其他指標
 
                     st.divider()
 
                     st.subheader("💡 系統操作建議 (未來3個月)")
                     st.markdown(f"#### 趨勢： **{result['trend']}**")
-                    
-                    # ADX 趨勢強度評估
                     st.info(f"**趨勢強度評估**：{result['trend_strength_advice']}")
-                    
                     col_b, col_s = st.columns(2)
                     with col_b: st.info(f"**🟢 建議進場**: ${result['entry_target']:.2f} 附近\n\n(支撐位/均線回測)")
                     with col_s: st.warning(f"**🔴 建議停利**: ${result['exit_target']:.2f} 附近\n\n(前波壓力區)")
-                    
                     st.success(f"**綜合點評**：:{result['advice_color']}[{result['advice']}]")
-
                     st.markdown("---")
-                    
                     st.markdown("### 📊 週線走勢圖 (近半年)")
-                    # 圖表加入 12週EMA
                     chart_data = result['history_df'][['Close', '20週均線', '12週EMA']]
                     st.line_chart(chart_data)
 
@@ -611,7 +545,7 @@ with tab3:
             fig_heatmap = px.imshow(res['corr_matrix'], text_auto=".2f", aspect="auto", color_continuous_scale='RdBu_r', zmin=-1, zmax=1)
             st.plotly_chart(fig_heatmap, use_container_width=True)
 
-            # 3. 績效指標表格 (原生排序)
+            # 3. 績效指標表格
             st.markdown("### 📊 個股風險與報酬指標 (可點擊標題排序)")
             
             perf_df = res['perf_df']
