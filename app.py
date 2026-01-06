@@ -429,43 +429,40 @@ with tab1:
                 pie_total_val = df_pie_filtered["現值(TWD)"].sum()
                 pie_total_profit = pie_total_val - pie_total_cost
                 pie_total_roi = (pie_total_profit / pie_total_cost * 100) if pie_total_cost > 0 else 0
-                roi_color = "#FF4B4B" if pie_total_roi > 0 else "#09AB3B" # 鮮豔的紅綠色
+                roi_color = "#FF4B4B" if pie_total_roi > 0 else "#09AB3B" # 鮮豔紅綠
 
                 fig2 = px.pie(
                     df_pie_filtered, 
                     values="現值(TWD)", 
                     names="股票代號", 
                     title=None, 
-                    hole=0.7 # 大圓孔
+                    hole=0.7
                 )
                 
-                # 僅顯示代號與權重，隱藏圖例以防止擠壓
-                fig2.update_traces(textinfo='label+percent', showlegend=False)
+                # --- 關鍵修正：隱藏圖例 (showlegend=False) ---
+                # 這是確保圓餅圖絕對置中的關鍵，避免被 Legend 擠歪
+                fig2.update_traces(
+                    textinfo='label+percent', # 在圖上顯示代號
+                    showlegend=False 
+                )
 
-                # 使用 add_annotation 強制覆蓋顯示
-                # 1. 組合報酬率標題 (白色)
-                fig2.add_annotation(
-                    text="組合報酬率",
-                    x=0.5, y=0.55,
-                    font=dict(size=18, color="white"), 
-                    showarrow=False,
-                    xref="paper", yref="paper",
-                    bgcolor="rgba(0,0,0,0)" # 透明背景
-                )
-                # 2. 數值 (紅/綠)
-                fig2.add_annotation(
-                    text=f"<b>{pie_total_roi:+.2f}%</b>",
-                    x=0.5, y=0.45,
-                    font=dict(size=28, color=roi_color),
-                    showarrow=False,
-                    xref="paper", yref="paper",
-                    bgcolor="rgba(0,0,0,0)"
-                )
-                
-                # 設定邊界，並確保圖表不被擠壓
+                # --- 關鍵修正：使用 annotations 列表添加雙層文字 ---
                 fig2.update_layout(
-                    margin=dict(t=20, b=20, l=20, r=20),
-                    showlegend=False # 強制關閉圖例，保證圓餅置中
+                    annotations=[
+                        dict(
+                            text="組合報酬率", 
+                            x=0.5, y=0.55, 
+                            font=dict(size=16), 
+                            showarrow=False
+                        ),
+                        dict(
+                            text=f"<b>{pie_total_roi:+.2f}%</b>", 
+                            x=0.5, y=0.45, 
+                            font=dict(size=26, color=roi_color), 
+                            showarrow=False
+                        )
+                    ],
+                    margin=dict(t=20, b=20, l=20, r=20)
                 )
                 
                 st.plotly_chart(fig2, use_container_width=True)
