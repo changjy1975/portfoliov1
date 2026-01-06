@@ -424,38 +424,47 @@ with tab1:
             else: df_pie_filtered = portfolio
 
             if not df_pie_filtered.empty:
-                # 1. 計算全投組總報酬率 (Total ROI)
-                grand_total_cost = portfolio["總投入成本(TWD)"].sum()
-                grand_total_val = portfolio["現值(TWD)"].sum()
-                grand_total_profit = grand_total_val - grand_total_cost
-                grand_total_roi = (grand_total_profit / grand_total_cost * 100) if grand_total_cost > 0 else 0
-                roi_color = "red" if grand_total_roi > 0 else "green"
+                # 1. 計算該範圍的總成本與總現值
+                pie_total_cost = df_pie_filtered["總投入成本(TWD)"].sum()
+                pie_total_val = df_pie_filtered["現值(TWD)"].sum()
+                
+                # 2. 計算組合總報酬率
+                pie_total_profit = pie_total_val - pie_total_cost
+                pie_total_roi = (pie_total_profit / pie_total_cost * 100) if pie_total_cost > 0 else 0
+                
+                # 3. 決定顏色
+                roi_color = "red" if pie_total_roi > 0 else "green"
 
-                # 2. 繪圖 (使用 add_annotation 強制添加文字)
+                # 4. 繪圖 - hole=0.7 留更多空間
                 fig2 = px.pie(
                     df_pie_filtered, 
                     values="現值(TWD)", 
                     names="股票代號", 
                     title=None, 
-                    hole=0.6 # 加大圓孔
+                    hole=0.7 # 加大圓孔
                 )
                 
-                # 3. 標籤只顯示：代號 + 權重
+                # 5. 標籤顯示
                 fig2.update_traces(
                     textinfo='label+percent', 
                     hovertemplate="<b>%{label}</b><br>現值: $%{value:,.0f}<br>權重: %{percent}"
                 )
 
-                # 4. 強制添加中心註解 (解決黑字問題)
-                fig2.add_annotation(
-                    text=f"總報酬率<br><span style='font-size:22px; color:{roi_color}; font-weight:bold;'>{grand_total_roi:+.2f}%</span>",
-                    x=0.5, y=0.5,
-                    font=dict(size=14, color="white"), # 預設白字 (深色模式適用)，數值則會吃 span 的顏色
-                    showarrow=False
+                # 6. 使用 update_layout 內的 annotations 強制寫入文字
+                # 這裡不依賴 add_annotation，而是直接設定 layout 屬性，這是最底層的方法
+                fig2.update_layout(
+                    annotations=[
+                        dict(
+                            text=f"總報酬率<br><span style='font-size:24px; color:{roi_color}; font-weight:bold;'>{pie_total_roi:+.2f}%</span>",
+                            x=0.5, y=0.5,
+                            font_size=16,
+                            showarrow=False,
+                            xanchor="center",
+                            yanchor="middle"
+                        )
+                    ],
+                    margin=dict(t=20, b=20, l=20, r=20)
                 )
-                
-                # 為了保險起見，如果是淺色模式，讓標題變黑
-                fig2.update_layout(margin=dict(t=20, b=20, l=20, r=20))
                 
                 st.plotly_chart(fig2, use_container_width=True)
             else: st.info(f"無 {filter_option} 資料")
