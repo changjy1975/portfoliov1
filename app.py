@@ -188,7 +188,6 @@ def perform_portfolio_analysis(portfolio_df):
             hist_data = hist_data.to_frame(name=symbols[0])
             
         hist_data = hist_data.dropna(how='all')
-        
         returns = hist_data.pct_change().dropna()
         corr_matrix = returns.corr()
         
@@ -425,13 +424,14 @@ with tab1:
             else: df_pie_filtered = portfolio
 
             if not df_pie_filtered.empty:
-                # 計算全投組總報酬率
-                grand_total_cost = portfolio["總投入成本(TWD)"].sum()
-                grand_total_val = portfolio["現值(TWD)"].sum()
-                grand_total_profit = grand_total_val - grand_total_cost
-                grand_total_roi = (grand_total_profit / grand_total_cost * 100) if grand_total_cost > 0 else 0
-                roi_color = "red" if grand_total_roi > 0 else "green"
+                # 1. 計算「該範圍」的總報酬率 (Total ROI for the selected filter)
+                pie_total_cost = df_pie_filtered["總投入成本(TWD)"].sum()
+                pie_total_val = df_pie_filtered["現值(TWD)"].sum()
+                pie_total_profit = pie_total_val - pie_total_cost
+                pie_total_roi = (pie_total_profit / pie_total_cost * 100) if pie_total_cost > 0 else 0
+                roi_color = "red" if pie_total_roi > 0 else "green"
 
+                # 2. 繪圖
                 fig2 = px.pie(
                     df_pie_filtered, 
                     values="現值(TWD)", 
@@ -440,27 +440,42 @@ with tab1:
                     hole=0.7 # 大圓孔
                 )
                 
+                # 3. 標籤顯示：僅顯示代號與權重 (hover 顯示現值)
                 fig2.update_traces(
                     textinfo='label+percent', 
                     hovertemplate="<b>%{label}</b><br>現值: $%{value:,.0f}<br>權重: %{percent}"
                 )
 
-                # --- 修正重點：使用 fig.add_annotation 強制加入雙行文字，並設定參考系為 'paper' ---
-                # 第一行：標題 (不設顏色，自動適應主題)
-                fig2.add_annotation(
-                    text="總報酬率",
-                    x=0.5, y=0.55,
-                    font=dict(size=16),
-                    showarrow=False,
-                    xref="paper", yref="paper"
-                )
-                # 第二行：數值 (強制紅/綠)
-                fig2.add_annotation(
-                    text=f"<b>{grand_total_roi:+.2f}%</b>",
-                    x=0.5, y=0.45,
-                    font=dict(size=24, color=roi_color),
-                    showarrow=False,
-                    xref="paper", yref="paper"
+                # 4. 強制圖例在底部，避免擠壓圓餅圖造成中心點偏移
+                fig2.update_layout(
+                    legend=dict(
+                        orientation="h",
+                        yanchor="bottom",
+                        y=-0.2, # 移到圖表下方
+                        xanchor="center",
+                        x=0.5
+                    ),
+                    margin=dict(t=20, b=50, l=20, r=20), # 增加底部邊界給圖例
+                    
+                    # 5. 強制加入雙行文字 (不使用 HTML，改用 annotations list)
+                    annotations=[
+                        # 標題 (自動顏色)
+                        dict(
+                            text="總報酬率",
+                            x=0.5, y=0.55,
+                            font=dict(size=16),
+                            showarrow=False,
+                            xref="paper", yref="paper"
+                        ),
+                        # 數值 (指定顏色)
+                        dict(
+                            text=f"<b>{pie_total_roi:+.2f}%</b>",
+                            x=0.5, y=0.45,
+                            font=dict(size=24, color=roi_color),
+                            showarrow=False,
+                            xref="paper", yref="paper"
+                        )
+                    ]
                 )
                 
                 st.plotly_chart(fig2, use_container_width=True)
