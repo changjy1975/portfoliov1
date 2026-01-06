@@ -429,7 +429,7 @@ with tab1:
                 grand_total_val = portfolio["現值(TWD)"].sum()
                 grand_total_profit = grand_total_val - grand_total_cost
                 grand_total_roi = (grand_total_profit / grand_total_cost * 100) if grand_total_cost > 0 else 0
-                roi_color = "#FF4B4B" if grand_total_roi > 0 else "#09AB3B" # Streamlit 標準紅綠
+                roi_color = "red" if grand_total_roi > 0 else "green"
 
                 fig2 = px.pie(
                     df_pie_filtered, 
@@ -444,12 +444,27 @@ with tab1:
                     hovertemplate="<b>%{label}</b><br>現值: $%{value:,.0f}<br>權重: %{percent}"
                 )
 
-                # 使用 add_annotation 強制添加文字 (支援 HTML)
-                fig2.add_annotation(
-                    text=f"<span style='font-size:16px; color:#909090;'>總報酬率</span><br><span style='font-size:26px; color:{roi_color}; font-weight:bold;'>{grand_total_roi:+.2f}%</span>",
-                    x=0.5, y=0.5,
-                    showarrow=False,
-                    font=dict(family="Arial", size=14) # 這裡的設定是 fallback，主要吃 HTML span
+                # --- 修正：使用兩個分開的 annotations，避免 HTML span 吃色問題 ---
+                fig2.update_layout(
+                    annotations=[
+                        # 1. 上方文字：總報酬率 (使用預設顏色，適應深/淺色主題)
+                        dict(
+                            text="總報酬率", 
+                            x=0.5, y=0.53, # 稍微偏上
+                            font_size=20, 
+                            showarrow=False
+                        ),
+                        # 2. 下方文字：數值 (強制指定紅/綠)
+                        dict(
+                            text=f"{grand_total_roi:+.2f}%", 
+                            x=0.5, y=0.47, # 稍微偏下
+                            font_size=24, 
+                            font_color=roi_color, 
+                            font_family="Arial Black", # 加粗字體
+                            showarrow=False
+                        )
+                    ],
+                    margin=dict(t=20, b=20, l=20, r=20)
                 )
                 
                 st.plotly_chart(fig2, use_container_width=True)
