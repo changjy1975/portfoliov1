@@ -1,4 +1,3 @@
-
 import streamlit as st
 import pandas as pd
 import yfinance as yf
@@ -189,28 +188,36 @@ def perform_portfolio_analysis(portfolio_df):
             hist_data = hist_data.to_frame(name=symbols[0])
             
         hist_data = hist_data.dropna(how='all')
+        
         returns = hist_data.pct_change().dropna()
         corr_matrix = returns.corr()
         
         performance_list = []
+        
         for symbol in hist_data.columns:
             try:
                 series = hist_data[symbol].dropna()
                 if len(series) < 20: continue 
                 
                 daily_rets = series.pct_change().dropna()
+                
                 days_diff = (series.index[-1] - series.index[0]).days
                 years = days_diff / 365.25
                 cagr = ((series.iloc[-1] / series.iloc[0]) ** (1/years)) - 1 if years > 0 else 0
+                
                 stdev = daily_rets.std() * np.sqrt(252)
+                
                 mean_ret = daily_rets.mean() * 252
                 sharpe = mean_ret / stdev if stdev != 0 else 0
+                
                 negative_rets = daily_rets[daily_rets < 0]
                 downside_std = negative_rets.std() * np.sqrt(252)
                 sortino = mean_ret / downside_std if downside_std != 0 else 0
                 
                 annual_prices = series.resample('YE').last()
-                if len(annual_prices) < 2: best_year = cagr; worst_year = cagr
+                if len(annual_prices) < 2:
+                     best_year = cagr
+                     worst_year = cagr
                 else:
                     annual_rets = series.resample('YE').apply(lambda x: (x.iloc[-1]/x.iloc[0])-1)
                     best_year = annual_rets.max()
@@ -218,21 +225,24 @@ def perform_portfolio_analysis(portfolio_df):
 
                 performance_list.append({
                     "股票代號": symbol,
-                    "CAGR (%)": cagr * 100,
-                    "年化波動率 (%)": stdev * 100,
-                    "Best Year (%)": best_year * 100,
-                    "Worst Year (%)": worst_year * 100,
+                    "CAGR (%)": cagr * 100,      
+                    "年化波動率 (%)": stdev * 100, 
+                    "Best Year (%)": best_year * 100, 
+                    "Worst Year (%)": worst_year * 100, 
                     "Sharpe Ratio": sharpe,
                     "Sortino Ratio": sortino
                 })
-            except Exception as e: pass 
+            except Exception as e:
+                pass 
 
         perf_df = pd.DataFrame(performance_list)
+
         suggestions = []
         total_val = portfolio_df["現值(TWD)"].sum()
         for idx, row in portfolio_df.iterrows():
             weight = row["現值(TWD)"] / total_val
-            if weight > 0.3: suggestions.append(f"⚠️ **集中度風險**：{row['股票代號']} 佔比達 {weight*100:.1f}%，建議適度減碼。")
+            if weight > 0.3:
+                suggestions.append(f"⚠️ **集中度風險**：{row['股票代號']} 佔比達 {weight*100:.1f}%，建議適度減碼。")
         
         cols = corr_matrix.columns
         high_corr_pairs = []
@@ -241,11 +251,15 @@ def perform_portfolio_analysis(portfolio_df):
                 c = corr_matrix.iloc[i, j]
                 if c > 0.8: high_corr_pairs.append(f"{cols[i]} & {cols[j]}")
         
-        if high_corr_pairs: suggestions.append(f"🔗 **連動風險**：以下股票走勢高度相關 (>0.8)：" + ", ".join(high_corr_pairs))
+        if high_corr_pairs:
+            suggestions.append(f"🔗 **連動風險**：以下股票走勢高度相關 (>0.8)：" + ", ".join(high_corr_pairs))
+        
         if not suggestions: suggestions.append("✅ 投資組合配置健康，無明顯集中或連動風險。")
 
         return {
-            "corr_matrix": corr_matrix, "suggestions": suggestions, "perf_df": perf_df
+            "corr_matrix": corr_matrix,
+            "suggestions": suggestions,
+            "perf_df": perf_df
         }, None
 
     except Exception as e:
@@ -420,31 +434,47 @@ with tab1:
         with col_pie2:
             st.markdown("#### 🔹 個股權重分佈")
             filter_option = st.selectbox("選擇顯示範圍", ["全部 (ALL)", "台股 (TW)", "美股 (US)"], label_visibility="collapsed")
+            
+            # 篩選資料
             if filter_option == "台股 (TW)": df_pie_filtered = portfolio[portfolio["幣別"] == "TWD"]
             elif filter_option == "美股 (US)": df_pie_filtered = portfolio[portfolio["幣別"] == "USD"]
             else: df_pie_filtered = portfolio
 
             if not df_pie_filtered.empty:
-                # 計算「整個投資組合」的總報酬率，而非篩選後的子集
-                grand_total_cost = portfolio["總投入成本(TWD)"].sum()
-                grand_total_val = portfolio["現值(TWD)"].sum()
-                grand_total_profit = grand_total_val - grand_total_cost
-                grand_total_roi = (grand_total_profit / grand_total_cost * 100) if grand_total_cost > 0 else 0
-                roi_color = "red" if grand_total_roi > 0 else "green"
-
-                fig2 = px.pie(df_pie_filtered, values="現值(TWD)", names="股票代號", title=None, hole=0.4)
-                fig2.update_traces(textinfo='percent+label')
+                # 1. 計算該範圍的總成本與總現值
+                pie_total_cost = df_pie_filtered["總投入成本(TWD)"].sum()
+                pie_total_val = df_pie_filtered["現值(TWD)"].sum()
                 
-                # 中心顯示「全投組」總報酬率
+                # 2. 計算組合總報酬率
+                pie_total_profit = pie_total_val - pie_total_cost
+                pie_total_roi = (pie_total_profit / pie_total_cost * 100) if pie_total_cost > 0 else 0
+                
+                # 3. 設定中心文字顏色
+                center_color = "red" if pie_total_roi > 0 else "green"
+
+                # 4. 繪圖
+                fig2 = px.pie(
+                    df_pie_filtered, 
+                    values="現值(TWD)", 
+                    names="股票代號", 
+                    title=None, 
+                    hole=0.5 
+                )
+                
+                # 設定標籤顯示：僅顯示「股票代號 + 權重百分比」，不顯示個股ROI
+                fig2.update_traces(textinfo='label+percent') 
+
+                # 5. 在中心加入總報酬率文字
                 fig2.update_layout(
                     annotations=[dict(
-                        text=f"總投報率<br>{grand_total_roi:+.2f}%", 
+                        text=f"組合總報酬<br><span style='font-size:24px; color:{center_color}'><b>{pie_total_roi:+.2f}%</b></span>", 
                         x=0.5, y=0.5, 
-                        font_size=20, 
-                        showarrow=False,
-                        font_color=roi_color
-                    )]
+                        font_size=14, 
+                        showarrow=False
+                    )],
+                    margin=dict(t=20, b=20, l=20, r=20)
                 )
+                
                 st.plotly_chart(fig2, use_container_width=True)
             else: st.info(f"無 {filter_option} 資料")
 
