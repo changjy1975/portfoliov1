@@ -4,3 +4,5 @@ yfinance
 plotly
 numpy
 matplotlib
+pytz
+
