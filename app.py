@@ -434,8 +434,6 @@ with tab1:
         with col_pie2:
             st.markdown("#### 🔹 個股權重分佈")
             filter_option = st.selectbox("選擇顯示範圍", ["全部 (ALL)", "台股 (TW)", "美股 (US)"], label_visibility="collapsed")
-            
-            # 篩選資料
             if filter_option == "台股 (TW)": df_pie_filtered = portfolio[portfolio["幣別"] == "TWD"]
             elif filter_option == "美股 (US)": df_pie_filtered = portfolio[portfolio["幣別"] == "USD"]
             else: df_pie_filtered = portfolio
@@ -449,29 +447,43 @@ with tab1:
                 pie_total_profit = pie_total_val - pie_total_cost
                 pie_total_roi = (pie_total_profit / pie_total_cost * 100) if pie_total_cost > 0 else 0
                 
-                # 3. 設定中心文字顏色
-                center_color = "red" if pie_total_roi > 0 else "green"
+                # 3. 決定顏色 (紅/綠) - 只影響數字部分
+                roi_color = "red" if pie_total_roi > 0 else "green"
 
-                # 4. 繪圖
+                # 4. 繪圖 - hole=0.6 擴大中間區域
                 fig2 = px.pie(
                     df_pie_filtered, 
                     values="現值(TWD)", 
                     names="股票代號", 
                     title=None, 
-                    hole=0.5 
+                    hole=0.6 # 加大圓孔
                 )
                 
-                # 設定標籤顯示：僅顯示「股票代號 + 權重百分比」，不顯示個股ROI
-                fig2.update_traces(textinfo='label+percent') 
+                # 5. 滑鼠懸停資訊：只顯示 代號、現值、權重 (不顯示個股 ROI)
+                fig2.update_traces(
+                    textinfo='label+percent', # 圖表上顯示 代號+權重
+                    hovertemplate="<b>%{label}</b><br>現值: $%{value:,.0f}<br>權重: %{percent}" # 移除個股ROI
+                )
 
-                # 5. 在中心加入總報酬率文字
+                # 6. 使用分開的註解來確保文字顏色正確顯示
+                # 第一個註解：顯示「總投報率」文字 (自動顏色)
+                # 第二個註解：顯示 數值 (指定顏色)
                 fig2.update_layout(
-                    annotations=[dict(
-                        text=f"組合總報酬<br><span style='font-size:24px; color:{center_color}'><b>{pie_total_roi:+.2f}%</b></span>", 
-                        x=0.5, y=0.5, 
-                        font_size=14, 
-                        showarrow=False
-                    )],
+                    annotations=[
+                        dict(
+                            text="總投報率", 
+                            x=0.5, y=0.55, # 稍微偏上
+                            font_size=16, 
+                            showarrow=False
+                        ),
+                        dict(
+                            text=f"<b>{pie_total_roi:+.2f}%</b>", 
+                            x=0.5, y=0.45, # 稍微偏下
+                            font_size=24, 
+                            font_color=roi_color, # 強制紅/綠
+                            showarrow=False
+                        )
+                    ],
                     margin=dict(t=20, b=20, l=20, r=20)
                 )
                 
