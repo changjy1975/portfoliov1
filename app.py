@@ -188,6 +188,7 @@ def perform_portfolio_analysis(portfolio_df):
             hist_data = hist_data.to_frame(name=symbols[0])
             
         hist_data = hist_data.dropna(how='all')
+        
         returns = hist_data.pct_change().dropna()
         corr_matrix = returns.corr()
         
@@ -436,7 +437,7 @@ with tab1:
                     values="現值(TWD)", 
                     names="股票代號", 
                     title=None, 
-                    hole=0.7
+                    hole=0.7 # 大圓孔
                 )
                 
                 fig2.update_traces(
@@ -444,27 +445,22 @@ with tab1:
                     hovertemplate="<b>%{label}</b><br>現值: $%{value:,.0f}<br>權重: %{percent}"
                 )
 
-                # --- 修正：使用兩個分開的 annotations，避免 HTML span 吃色問題 ---
-                fig2.update_layout(
-                    annotations=[
-                        # 1. 上方文字：總報酬率 (使用預設顏色，適應深/淺色主題)
-                        dict(
-                            text="總報酬率", 
-                            x=0.5, y=0.53, # 稍微偏上
-                            font_size=20, 
-                            showarrow=False
-                        ),
-                        # 2. 下方文字：數值 (強制指定紅/綠)
-                        dict(
-                            text=f"{grand_total_roi:+.2f}%", 
-                            x=0.5, y=0.47, # 稍微偏下
-                            font_size=24, 
-                            font_color=roi_color, 
-                            font_family="Arial Black", # 加粗字體
-                            showarrow=False
-                        )
-                    ],
-                    margin=dict(t=20, b=20, l=20, r=20)
+                # --- 修正重點：使用 fig.add_annotation 強制加入雙行文字，並設定參考系為 'paper' ---
+                # 第一行：標題 (不設顏色，自動適應主題)
+                fig2.add_annotation(
+                    text="總報酬率",
+                    x=0.5, y=0.55,
+                    font=dict(size=16),
+                    showarrow=False,
+                    xref="paper", yref="paper"
+                )
+                # 第二行：數值 (強制紅/綠)
+                fig2.add_annotation(
+                    text=f"<b>{grand_total_roi:+.2f}%</b>",
+                    x=0.5, y=0.45,
+                    font=dict(size=24, color=roi_color),
+                    showarrow=False,
+                    xref="paper", yref="paper"
                 )
                 
                 st.plotly_chart(fig2, use_container_width=True)
