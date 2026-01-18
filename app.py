@@ -94,504 +94,107 @@ def get_current_prices(symbols):
 def identify_currency(symbol):
     return "TWD" if (".TW" in symbol or ".TWO" in symbol) else "USD"
 
-# ==========================================
-# 技術分析邏輯 (Tab 2)
-# ==========================================
-def calculate_rsi(series, period=14):
-    delta = series.diff()
-    gain = (delta.where(delta > 0, 0)).rolling(window=period).mean()
-    loss = (-delta.where(delta < 0, 0)).rolling(window=period).mean()
-    rs = gain / loss
-    return 100 - (100 / (1 + rs))
-
-def calculate_ema(series, period):
-    return series.ewm(span=period, adjust=False).mean()
-
-def calculate_adx_atr(df, period=14):
-    df_ta = df.copy()
-    df_ta['H-L'] = df_ta['High'] - df_ta['Low']
-    df_ta['H-PC'] = np.abs(df_ta['High'] - df_ta['Close'].shift(1))
-    df_ta['L-PC'] = np.abs(df_ta['Low'] - df_ta['Close'].shift(1))
-    df_ta['TR'] = df_ta[['H-L', 'H-PC', 'L-PC']].max(axis=1)
-    df_ta['ATR'] = df_ta['TR'].ewm(span=period, adjust=False).mean()
-    df_ta['+DM'] = 0.0
-    df_ta['-DM'] = 0.0
-    high_diff = df_ta['High'] - df_ta['High'].shift(1)
-    low_diff = df_ta['Low'].shift(1) - df_ta['Low']
-    df_ta.loc[high_diff > low_diff, '+DM'] = np.maximum(high_diff, 0)
-    df_ta.loc[low_diff > high_diff, '-DM'] = np.maximum(low_diff, 0)
-    df_ta['+DM_EMA'] = df_ta['+DM'].ewm(span=period, adjust=False).mean()
-    df_ta['-DM_EMA'] = df_ta['-DM'].ewm(span=period, adjust=False).mean()
-    df_ta['+DI'] = (df_ta['+DM_EMA'] / df_ta['ATR']) * 100
-    df_ta['-DI'] = (df_ta['-DM_EMA'] / df_ta['ATR']) * 100
-    sum_di = df_ta['+DI'] + df_ta['+DI']
-    df_ta['DX'] = (np.abs(df_ta['+DI'] - df_ta['-DI']) / sum_di) * 100
-    df_ta['DX'] = df_ta['DX'].replace([np.inf, -np.inf], np.nan).fillna(0) 
-    df_ta['ADX'] = df_ta['DX'].ewm(span=period, adjust=False).mean()
-    return df_ta['ADX'], df_ta['ATR']
-
-def analyze_stock_technical(symbol):
-    try:
-        stock = yf.Ticker(symbol)
-        df = stock.history(period="3y", interval="1wk")
-        if df.empty: return None, "無法獲取歷史資料"
-        df_recent = df.tail(26).copy() 
-        current_price = df['Close'].iloc[-1]
-        high_6m = df_recent['High'].max()
-        low_6m = df_recent['Low'].min()
-        ma_20 = df['Close'].rolling(window=20).mean().iloc[-1]
-        rsi_curr = calculate_rsi(df['Close'], 14).iloc[-1]
-        ema_12_curr = calculate_ema(df['Close'], period=12).iloc[-1]
-        adx_series, atr_series = calculate_adx_atr(df, period=14)
-        adx_curr = adx_series.iloc[-1]
-        atr_curr = atr_series.iloc[-1]
-        trend = "多頭排列 🐂" if current_price > ma_20 else "空頭/整理 🐻"
-        entry_price = max(low_6m * 1.02, ma_20)
-        exit_price = high_6m * 0.98
-        
-        if rsi_curr > 70: advice, color = "過熱，建議分批獲利", "red"
-        elif rsi_curr < 30: advice, color = "超賣，可考慮分批佈局", "green"
-        elif current_price > ma_20: advice, color = "趨勢向上，持股續抱", "orange"
-        else: advice, color = "趨勢偏弱，觀望或區間操作", "gray"
-        
-        trend_strength_advice = ""
-        if adx_curr > 25: trend_strength_advice = f"目前趨勢強勁 (ADX: {adx_curr:.1f})，適合順勢操作。"
-        elif adx_curr < 20: trend_strength_advice = f"目前趨勢不明顯，處於盤整 (ADX: {adx_curr:.1f})，不適合追價。"
-        else: trend_strength_advice = f"目前趨勢存在但強度一般 (ADX: {adx_curr:.1f})。"
-
-        df_recent['20週均線'] = df['Close'].rolling(window=20).mean().loc[df_recent.index]
-        df_recent['12週EMA'] = calculate_ema(df['Close'], period=12).loc[df_recent.index]
-
-        return {
-            "current_price": current_price, "high_6m": high_6m, "low_6m": low_6m,
-            "ma_20": ma_20, "rsi": rsi_curr, "ema_12": ema_12_curr,
-            "adx": adx_curr, "atr": atr_curr, "trend": trend,
-            "entry_target": entry_price, "exit_target": exit_price,
-            "advice": advice, "advice_color": color,
-            "trend_strength_advice": trend_strength_advice, "history_df": df_recent
-        }, None
-    except Exception as e:
-        return None, str(e)
-
-# ==========================================
-# 投資組合分析邏輯 (Tab 3)
-# ==========================================
-def perform_portfolio_analysis(portfolio_df):
+def get_historical_pl_trend(portfolio_df, period="1y"):
+    """計算過去一段時間的每日總損益趨勢"""
     symbols = portfolio_df["股票代號"].unique().tolist()
-    if not symbols: return None, "無持股資料"
+    if not symbols: return None
 
     try:
-        tickers_str = " ".join(symbols)
-        hist_data = yf.download(tickers_str, period="3y", interval="1d", auto_adjust=True)['Close']
+        # 1. 抓取歷史股價
+        data = yf.download(symbols, period=period, interval="1d")['Close']
+        if isinstance(data, pd.Series): 
+            data = data.to_frame(name=symbols[0])
         
-        if isinstance(hist_data, pd.Series):
-            hist_data = hist_data.to_frame(name=symbols[0])
+        # 2. 抓取歷史匯率
+        usd_twd_hist = yf.download("USDTWD=X", period=period, interval="1d")['Close']
+        
+        # 確保資料對齊
+        combined_df = data.ffill().dropna()
+        usd_twd_hist = usd_twd_hist.reindex(combined_df.index, method='ffill')
+        
+        daily_total_value_twd = pd.Series(0, index=combined_df.index)
+        total_invested_twd = 0
+
+        for _, row in portfolio_df.iterrows():
+            sym = row["股票代號"]
+            qty = row["股數"]
+            cost_unit = row["平均持有單價"]
+            currency = identify_currency(sym)
             
-        hist_data = hist_data.dropna(how='all')
-        returns = hist_data.pct_change().dropna()
-        corr_matrix = returns.corr()
-        
-        performance_list = []
-        for symbol in hist_data.columns:
-            try:
-                series = hist_data[symbol].dropna()
-                if len(series) < 20: continue 
-                
-                daily_rets = series.pct_change().dropna()
-                days_diff = (series.index[-1] - series.index[0]).days
-                years = days_diff / 365.25
-                cagr = ((series.iloc[-1] / series.iloc[0]) ** (1/years)) - 1 if years > 0 else 0
-                stdev = daily_rets.std() * np.sqrt(252)
-                mean_ret = daily_rets.mean() * 252
-                sharpe = mean_ret / stdev if stdev != 0 else 0
-                negative_rets = daily_rets[daily_rets < 0]
-                downside_std = negative_rets.std() * np.sqrt(252)
-                sortino = mean_ret / downside_std if downside_std != 0 else 0
-                
-                annual_prices = series.resample('YE').last()
-                if len(annual_prices) < 2: best_year = cagr; worst_year = cagr
+            if sym in combined_df.columns:
+                if currency == "USD":
+                    # 美股：每日市值換算為 TWD
+                    daily_val = combined_df[sym] * qty * usd_twd_hist
+                    # 成本以目前的匯率估計 (簡化版)
+                    invested = cost_unit * qty * usd_twd_hist.iloc[-1]
                 else:
-                    annual_rets = series.resample('YE').apply(lambda x: (x.iloc[-1]/x.iloc[0])-1)
-                    best_year = annual_rets.max()
-                    worst_year = annual_rets.min()
+                    daily_val = combined_df[sym] * qty
+                    invested = cost_unit * qty
+                
+                daily_total_value_twd += daily_val
+                total_invested_twd += invested
 
-                performance_list.append({
-                    "股票代號": symbol,
-                    "CAGR (%)": cagr * 100,
-                    "年化波動率 (%)": stdev * 100,
-                    "Best Year (%)": best_year * 100,
-                    "Worst Year (%)": worst_year * 100,
-                    "Sharpe Ratio": sharpe,
-                    "Sortino Ratio": sortino
-                })
-            except Exception as e: pass 
-
-        perf_df = pd.DataFrame(performance_list)
-        suggestions = []
-        total_val = portfolio_df["現值(TWD)"].sum()
-        for idx, row in portfolio_df.iterrows():
-            weight = row["現值(TWD)"] / total_val
-            if weight > 0.3: suggestions.append(f"⚠️ **集中度風險**：{row['股票代號']} 佔比達 {weight*100:.1f}%，建議適度減碼。")
-        
-        cols = corr_matrix.columns
-        high_corr_pairs = []
-        for i in range(len(cols)):
-            for j in range(i+1, len(cols)):
-                c = corr_matrix.iloc[i, j]
-                if c > 0.8: high_corr_pairs.append(f"{cols[i]} & {cols[j]}")
-        
-        if high_corr_pairs: suggestions.append(f"🔗 **連動風險**：以下股票走勢高度相關 (>0.8)：" + ", ".join(high_corr_pairs))
-        if not suggestions: suggestions.append("✅ 投資組合配置健康，無明顯集中或連動風險。")
-
-        return {
-            "corr_matrix": corr_matrix, "suggestions": suggestions, "perf_df": perf_df
-        }, None
-
+        trend_df = pd.DataFrame({
+            "總市值": daily_total_value_twd,
+            "累計損益": daily_total_value_twd - total_invested_twd
+        })
+        return trend_df
     except Exception as e:
-        return None, str(e)
+        return None
 
 # ==========================================
-# 介面顯示組件
+# 技術分析邏輯 (Tab 2) ... (省略重複的部分以保持簡潔，建議保留原有的 analyze_stock_technical 等函數)
 # ==========================================
+# [此處保留原本 app (1).py 的 calculate_rsi, analyze_stock_technical, perform_portfolio_analysis 函數]
+# ... 
 
-COLS_RATIO = [1.3, 0.9, 1, 1, 1.3, 1.3, 1.3, 1, 0.6]
+# ==========================================
+# 介面顯示組件 ... (省略重複的 display_headers, display_stock_rows 等)
+# ==========================================
+# [此處保留原本 app (1).py 的介面函數]
+# ...
 
-def update_sort(column_name):
-    if st.session_state.sort_col == column_name:
-        st.session_state.sort_asc = not st.session_state.sort_asc
-    else:
-        st.session_state.sort_col = column_name
-        st.session_state.sort_asc = False
-
-def get_header_label(label, col_name):
-    if st.session_state.sort_col == col_name:
-        arrow = "▲" if st.session_state.sort_asc else "▼"
-        return f"{label} {arrow}"
-    return label
-
-def display_headers(key_suffix):
-    st.markdown("<div style='padding-right: 15px;'>", unsafe_allow_html=True) 
-    cols = st.columns(COLS_RATIO)
-    headers_map = [
-        ("代號", "股票代號"), ("股數", "股數"), ("均價", "平均持有單價"), 
-        ("現價", "最新股價"), ("總成本", "總投入成本(原幣)"), 
-        ("現值", "現值(原幣)"), ("獲利", "獲利(原幣)"), ("報酬率%", "獲利率(%)")
-    ]
-    for col, (label, col_name) in zip(cols[:-1], headers_map):
-        if col.button(get_header_label(label, col_name), key=f"btn_head_{col_name}_{key_suffix}"):
-            update_sort(col_name)
-            st.rerun()
-            
-    cols[-1].markdown("**管理**")
-    st.markdown("</div>", unsafe_allow_html=True)
-    st.markdown("<hr style='margin: 0px 0 10px 0; border-top: 2px solid #666;'>", unsafe_allow_html=True)
-
-def display_stock_rows(df, currency_type):
-    try:
-        df_sorted = df.sort_values(by=st.session_state.sort_col, ascending=st.session_state.sort_asc)
-    except:
-        df_sorted = df
-
-    for index, row in df_sorted.iterrows():
-        c1, c2, c3, c4, c5, c6, c7, c8, c9 = st.columns(COLS_RATIO)
-        symbol = row["股票代號"]
-        price = row["最新股價"]
-        cost = row["總投入成本(原幣)"]
-        val = row["現值(原幣)"]
-        prof = row["獲利(原幣)"]
-        roi = row["獲利率(%)"]
-        color = "red" if prof > 0 else "green"
-        fmt = "{:,.0f}" if currency_type == "TWD" else "{:,.2f}"
-
-        c1.write(f"**{symbol}**")
-        c2.write(f"{row['股數']:.3f}") 
-        c3.write(f"{row['平均持有單價']:.2f}")
-        c4.write(f"{price:.2f}")
-        c5.write(fmt.format(cost))
-        c6.write(fmt.format(val))
-        c7.markdown(f":{color}[{fmt.format(prof)}]")
-        c8.markdown(f":{color}[{roi:.2f}%]")
-        if c9.button("🗑️", key=f"del_{symbol}"): remove_stock(symbol); st.rerun()
-        
-        st.markdown("<hr style='margin: 5px 0; border-top: 1px solid #eee;'>", unsafe_allow_html=True)
-
-def display_subtotal_row(df, currency_type):
-    total_cost = df["總投入成本(原幣)"].sum()
-    total_val = df["現值(原幣)"].sum()
-    total_profit = df["獲利(原幣)"].sum()
-    roi = (total_profit / total_cost * 100) if total_cost > 0 else 0
-    
-    st.markdown("<hr style='margin: 10px 0; border-top: 2px solid #666;'>", unsafe_allow_html=True)
-    c1, c2, c3, c4, c5, c6, c7, c8, c9 = st.columns(COLS_RATIO)
-    fmt = "{:,.0f}" if currency_type == "TWD" else "{:,.2f}"
-    color = "red" if total_profit > 0 else "green"
-    
-    c1.markdown("**🔹 類別小計**")
-    c5.markdown(f"**{fmt.format(total_cost)}**")
-    c6.markdown(f"**{fmt.format(total_val)}**")
-    c7.markdown(f":{color}[**{fmt.format(total_profit)}**]")
-    c8.markdown(f":{color}[**{roi:.2f}%**]")
-    return total_val, total_profit
+# (以下為整合了新圖表的「主程式邏輯」部分)
 
 # ==========================================
 # 主程式邏輯
 # ==========================================
+# (由於內容較長，我重點展示整合趨勢圖的 Tab 1 部分)
 
-tab1, tab2, tab3 = st.tabs(["📊 庫存與資產配置", "🧠 AI 技術分析與建議", "⚖️ 投資組合分析與再平衡"])
+# [中間程式碼同原檔，直到進入 Tab 1]
 
-df_record = load_data()
-
-if not df_record.empty:
-    usd_rate = get_exchange_rate()
-    df_record['幣別'] = df_record['股票代號'].apply(identify_currency)
-    df_record['總投入成本(原幣)'] = df_record['股數'] * df_record['持有成本單價']
-    
-    portfolio = df_record.groupby(["股票代號", "幣別"]).agg({
-        "股數": "sum",
-        "總投入成本(原幣)": "sum"
-    }).reset_index()
-    portfolio["平均持有單價"] = portfolio["總投入成本(原幣)"] / portfolio["股數"]
-
-# --- Tab 1: 庫存與資產配置 ---
 with tab1:
-    with st.sidebar:
-        st.header("📝 新增投資")
-        with st.form("add_stock_form"):
-            symbol_input = st.text_input("股票代號", value="2330.TW").upper().strip()
-            qty_input = st.number_input("股數", min_value=0.0, value=1000.0, step=0.001, format="%.3f")
-            cost_input = st.number_input("單價 (原幣)", min_value=0.0, value=500.0)
-            if st.form_submit_button("新增"):
-                df = load_data()
-                new_data = pd.DataFrame({"股票代號": [symbol_input], "股數": [qty_input], "持有成本單價": [cost_input]})
-                df = pd.concat([df, new_data], ignore_index=True)
-                save_data(df)
-                st.success(f"已新增 {symbol_input}"); st.rerun()
-        if st.button("🚨 清空所有"):
-            if os.path.exists(DATA_FILE): os.remove(DATA_FILE); st.rerun()
+    # ... (側邊欄與數據載入邏輯同原檔) ...
 
-    if df_record.empty:
-        st.info("請先從側邊欄新增投資紀錄。")
-    else:
-        st.sidebar.markdown(f"--- \n 💱 匯率: **{usd_rate:.2f}**")
-        
-        unique_symbols = portfolio["股票代號"].tolist()
-        with st.spinner('正在同步最新市場即時價格 (Fast Info)...'):
-            current_prices = get_current_prices(unique_symbols)
-        
-        portfolio["最新股價"] = portfolio["股票代號"].map(current_prices)
-        portfolio = portfolio.dropna(subset=["最新股價"])
-
-        portfolio["現值(原幣)"] = portfolio["股數"] * portfolio["最新股價"]
-        portfolio["獲利(原幣)"] = portfolio["現值(原幣)"] - portfolio["總投入成本(原幣)"]
-        portfolio["獲利率(%)"] = (portfolio["獲利(原幣)"] / portfolio["總投入成本(原幣)"]) * 100
-        
-        portfolio["匯率因子"] = portfolio["幣別"].apply(lambda x: 1 if x == "TWD" else usd_rate)
-        portfolio["現值(TWD)"] = portfolio["現值(原幣)"] * portfolio["匯率因子"]
-        portfolio["總投入成本(TWD)"] = portfolio["總投入成本(原幣)"] * portfolio["匯率因子"]
-        portfolio["獲利(TWD)"] = portfolio["現值(TWD)"] - portfolio["總投入成本(TWD)"]
-
-        # 總資產看板
-        total_val = portfolio["現值(TWD)"].sum()
-        total_cost = portfolio["總投入成本(TWD)"].sum()
-        total_profit = portfolio["獲利(TWD)"].sum()
-        roi = (total_profit / total_cost * 100) if total_cost > 0 else 0
-
-        col1, col2, col3 = st.columns(3)
-        col1.metric("💰 總資產 (TWD)", f"${total_val:,.0f}")
-        col2.metric("💳 總投入成本 (TWD)", f"${total_cost:,.0f}")
-        col3.metric("📈 總獲利", f"${total_profit:,.0f}", f"{roi:.2f}%")
+    if not df_record.empty:
+        # (總資產看板 metric 顯示同原檔)
+        # ...
         
         st.markdown("---")
-
-        # 圖表區
-        st.subheader("📊 資產分佈分析")
-        col_pie1, col_pie2 = st.columns(2)
         
-        with col_pie1:
-            st.markdown("#### 🔹 資產類別佔比")
-            st.write("") 
-            st.write("") 
-            df_pie_cat = portfolio.groupby("幣別")["現值(TWD)"].sum().reset_index()
-            df_pie_cat["類別名稱"] = df_pie_cat["幣別"].map({"TWD": "台股 (TWD)", "USD": "美股 (USD)"})
-            fig1 = px.pie(df_pie_cat, values="現值(TWD)", names="類別名稱", title=None, hole=0.4, color_discrete_sequence=px.colors.sequential.RdBu)
-            st.plotly_chart(fig1, use_container_width=True)
-
-        with col_pie2:
-            st.markdown("#### 🔹 個股權重分佈 (含報酬率)")
-            filter_option = st.selectbox("選擇顯示範圍", ["全部 (ALL)", "台股 (TW)", "美股 (US)"], label_visibility="collapsed")
-            if filter_option == "台股 (TW)": df_pie_filtered = portfolio[portfolio["幣別"] == "TWD"]
-            elif filter_option == "美股 (US)": df_pie_filtered = portfolio[portfolio["幣別"] == "USD"]
-            else: df_pie_filtered = portfolio
-
-            if not df_pie_filtered.empty:
-                # 1. 計算該範圍的總報酬率
-                pie_total_cost = df_pie_filtered["總投入成本(TWD)"].sum()
-                pie_total_val = df_pie_filtered["現值(TWD)"].sum()
-                pie_total_profit = pie_total_val - pie_total_cost
-                pie_total_roi = (pie_total_profit / pie_total_cost * 100) if pie_total_cost > 0 else 0
-                roi_color = "#FF4B4B" if pie_total_roi > 0 else "#09AB3B" # 鮮豔的紅綠色
-
-                # 2. 繪圖 - 使用大圓孔模擬甜甜圈
-                fig2 = px.pie(
-                    df_pie_filtered, 
-                    values="現值(TWD)", 
-                    names="股票代號", 
-                    title=None, 
-                    hole=0.7 # 大圓孔
-                )
-                
-                # 3. 設定標籤在圓餅圖外部，隱藏圖例 (重要!)
-                # 這是為了讓圓餅圖在畫布上絕對置中，不會被圖例擠歪
-                fig2.update_traces(
-                    textposition='outside', 
-                    textinfo='label+percent',
-                    showlegend=False
-                )
-
-                # 4. 強制使用 annotations 添加中心文字
-                # 這種方式比 HTML span 更穩定，因為它有自己的座標系
-                fig2.update_layout(
-                    annotations=[
-                        # 上方標題
-                        dict(
-                            text="總報酬率",
-                            x=0.5, y=0.55,
-                            font=dict(size=18, color="gray"), # 灰色字體適應深淺色
-                            showarrow=False
-                        ),
-                        # 下方數值
-                        dict(
-                            text=f"<b>{pie_total_roi:+.2f}%</b>",
-                            x=0.5, y=0.45,
-                            font=dict(size=32, color=roi_color), # 大字體，強制紅/綠
-                            showarrow=False
-                        )
-                    ],
-                    margin=dict(t=30, b=30, l=30, r=30)
-                )
-                
-                st.plotly_chart(fig2, use_container_width=True)
-            else: st.info(f"無 {filter_option} 資料")
-
-        st.markdown("---")
-
-        # 詳細庫存列表
-        st.subheader("📦 詳細庫存列表")
-        df_tw = portfolio[portfolio["幣別"] == "TWD"].copy()
-        df_us = portfolio[portfolio["幣別"] == "USD"].copy()
-
-        st.caption("🇹🇼 台股")
-        if not df_tw.empty:
-            display_headers("tw") 
-            with st.container(height=300, border=False):
-                display_stock_rows(df_tw, "TWD")
-            display_subtotal_row(df_tw, "TWD")
-        else: st.write("無持倉")
-
-        st.write("") 
-
-        st.caption("🇺🇸 美股")
-        if not df_us.empty:
-            display_headers("us") 
-            with st.container(height=300, border=False):
-                display_stock_rows(df_us, "USD")
-            us_val, us_prof = display_subtotal_row(df_us, "USD")
-            st.markdown(f"<div style='text-align: right; color: gray; font-size: 0.9em;'>約 NT$ {us_val*usd_rate:,.0f} | 獲利 NT$ {us_prof*usd_rate:,.0f}</div>", unsafe_allow_html=True)
-
-# --- Tab 2: 技術分析 ---
-with tab2:
-    if df_record.empty:
-        st.info("請先新增庫存股票。")
-    else:
-        st.subheader("🧠 持股健診與進出建議")
-        stock_list = portfolio["股票代號"].tolist()
-        selected_stock = st.selectbox("請選擇要分析的股票：", stock_list)
-
-        if selected_stock:
-            with st.spinner(f"分析中 {selected_stock}..."):
-                result, error = analyze_stock_technical(selected_stock)
-                if error: st.error(error)
-                else:
-                    c1, c2, c3, c4 = st.columns(4)
-                    c1.metric("目前價格", f"{result['current_price']:.2f}")
-                    c2.metric("半年高 (壓力)", f"{result['high_6m']:.2f}")
-                    c3.metric("半年低 (支撐)", f"{result['low_6m']:.2f}")
-                    c4.metric("RSI 指標", f"{result['rsi']:.1f}")
-                    
-                    c5, c6, c7, c8 = st.columns(4)
-                    c5.metric("12週EMA", f"{result['ema_12']:.2f}")
-                    c6.metric("ADX (14週)", f"{result['adx']:.1f}")
-                    c7.metric("ATR (14週)", f"{result['atr']:.2f}")
-
-                    st.divider()
-
-                    st.subheader("💡 系統操作建議 (未來3個月)")
-                    st.markdown(f"#### 趨勢： **{result['trend']}**")
-                    st.info(f"**趨勢強度評估**：{result['trend_strength_advice']}")
-                    col_b, col_s = st.columns(2)
-                    with col_b: st.info(f"**🟢 建議進場**: ${result['entry_target']:.2f} 附近\n\n(支撐位/均線回測)")
-                    with col_s: st.warning(f"**🔴 建議停利**: ${result['exit_target']:.2f} 附近\n\n(前波壓力區)")
-                    st.success(f"**綜合點評**：:{result['advice_color']}[{result['advice']}]")
-                    st.markdown("---")
-                    st.markdown("### 📊 週線走勢圖 (近半年)")
-                    chart_data = result['history_df'][['Close', '20週均線', '12週EMA']]
-                    st.line_chart(chart_data)
-
-# --- Tab 3: 投資組合分析與再平衡 ---
-with tab3:
-    if df_record.empty:
-        st.info("請先新增投資紀錄，系統才能進行組合分析。")
-    else:
-        st.subheader("⚖️ 投資組合健檢與再平衡")
+        # --- 新增：每日損益趨勢圖 ---
+        st.subheader("📈 累計損益變動趨勢 (TWD)")
+        period_choice = st.select_slider("選擇顯示區間", options=["1mo", "3mo", "6mo", "1y"], value="1y", label_visibility="collapsed")
         
-        if st.button("🚀 啟動/更新 深度分析 (需抓取36個月資料)", type="primary"):
-            with st.spinner("正在下載歷史股價並進行關聯性分析... (可能需要幾秒鐘)"):
-                analysis_result, err = perform_portfolio_analysis(portfolio)
-                if err: st.error(f"分析失敗: {err}")
-                else: st.session_state['analysis_result'] = analysis_result
-
-        if 'analysis_result' in st.session_state:
-            res = st.session_state['analysis_result']
-            st.divider()
-
-            # 1. 投資組合分佈
-            st.markdown("### 1️⃣ 投資組合權重分佈 (TWD計價)")
-            fig_pie_all = px.pie(portfolio, values="現值(TWD)", names="股票代號", title="全投組資金佔比", hole=0.4)
-            fig_pie_all.update_traces(textinfo='percent+label')
-            st.plotly_chart(fig_pie_all, use_container_width=True)
-            st.divider()
-
-            # 2. 相關係數分析
-            st.markdown("### 2️⃣ 個股相關係數矩陣 (近36個月)")
-            st.caption("數值 > 0.8 代表高度正相關 (風險未分散)；數值 < 0 代表負相關 (具避險效果)。")
-            fig_heatmap = px.imshow(res['corr_matrix'], text_auto=".2f", aspect="auto", color_continuous_scale='RdBu_r', zmin=-1, zmax=1)
-            st.plotly_chart(fig_heatmap, use_container_width=True)
-
-            # 3. 績效指標表格 (原生排序)
-            st.markdown("### 📊 個股風險與報酬指標 (可點擊標題排序)")
+        with st.spinner('正在分析歷史數據...'):
+            trend_data = get_historical_pl_trend(portfolio, period=period_choice)
             
-            perf_df = res['perf_df']
-            if not perf_df.empty:
-                st.dataframe(
-                    perf_df,
-                    column_config={
-                        "股票代號": st.column_config.TextColumn("股票代號"),
-                        "CAGR (%)": st.column_config.NumberColumn("CAGR (年化報酬)", format="%.2f%%"),
-                        "年化波動率 (%)": st.column_config.NumberColumn("年化波動率", format="%.2f%%"),
-                        "Best Year (%)": st.column_config.NumberColumn("Best Year", format="%.2f%%"),
-                        "Worst Year (%)": st.column_config.NumberColumn("Worst Year", format="%.2f%%"),
-                        "Sharpe Ratio": st.column_config.NumberColumn("Sharpe (夏普)", format="%.2f"),
-                        "Sortino Ratio": st.column_config.NumberColumn("Sortino (索提諾)", format="%.2f"),
-                    },
-                    use_container_width=True,
-                    hide_index=True
-                )
-            
-            st.divider()
-
-            # 4. 再平衡建議
-            st.markdown("### 3️⃣ 優劣分析與再平衡建議")
-            for suggestion in res['suggestions']:
-                st.info(suggestion)
+        if trend_data is not None:
+            fig_trend = px.line(
+                trend_data, 
+                y="累計損益", 
+                title=f"過去 {period_choice} 投資組合損益走勢",
+                labels={"Date": "日期", "累計損益": "金額 (TWD)"},
+                color_discrete_sequence=["#2ECC71"]
+            )
+            fig_trend.add_hline(y=0, line_dash="dash", line_color="gray")
+            fig_trend.update_layout(hovermode="x unified", plot_bgcolor='rgba(0,0,0,0)')
+            st.plotly_chart(fig_trend, use_container_width=True)
         else:
-            st.write("👆 請點擊上方按鈕開始分析。")
+            st.info("暫無足夠歷史數據生成趨勢圖。")
+
+        st.markdown("---")
+
+        # 圖表區 (原本的圓餅圖)
+        st.subheader("📊 資產分佈分析")
+        # ... (以下接原檔的 col_pie1, col_pie2 以及詳細庫存列表)
