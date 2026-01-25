@@ -2,7 +2,6 @@ streamlit
 pandas
 yfinance
 plotly
-numpy
-matplotlib
 pytz
-
+numpy
+st-gsheets-connection
