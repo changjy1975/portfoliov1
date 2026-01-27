@@ -217,7 +217,7 @@ with st.sidebar:
                 save_data(pd.concat([df, pd.DataFrame([{"股票代號":s_in,"股數":q_in,"持有成本單價":c_in}])], ignore_index=True), current_user)
                 st.rerun()
 
-# --- 全局資料準備 (重要：解決 ValueError) ---
+# --- 全局資料準備 ---
 df_record = pd.concat([load_data("Alan"), load_data("Jenny")], ignore_index=True) if current_user == "All" else load_data(current_user)
 
 if not df_record.empty:
@@ -276,7 +276,6 @@ with tab3:
     if df_record.empty: st.info("無數據。")
     else:
         st.subheader("⚖️ 現代投資組合理論 (MPT) 模擬引擎")
-        [Image of modern portfolio theory efficient frontier]
         if st.button("🚀 啟動數學模擬器", type="primary"):
             with st.spinner("模擬 2000 種權重組合中..."):
                 data, err = perform_mpt_simulation(portfolio)
