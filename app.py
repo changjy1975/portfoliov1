@@ -84,7 +84,7 @@ def identify_currency(symbol):
     return "TWD" if (".TW" in symbol or ".TWO" in symbol) else "USD"
 
 # ==========================================
-# 3. 介面組件
+# 3. 介面組件 (表格與小計)
 # ==========================================
 COLS_RATIO = [1.3, 0.9, 1, 1, 1.3, 1.3, 1.3, 1, 0.6]
 
@@ -118,6 +118,24 @@ def display_stock_rows(df, currency_type, current_user):
         else:
             if c9.button("🗑️", key=f"del_{row['股票代號']}_{current_user}"):
                 remove_stock(row['股票代號'], current_user); st.rerun()
+
+def display_subtotal_row(df, currency_type):
+    """計算並顯示特定幣別的小計列"""
+    t_cost = df["總投入成本(原幣)"].sum()
+    t_val = df["現值(原幣)"].sum()
+    t_profit = df["獲利(原幣)"].sum()
+    roi = (t_profit / t_cost * 100) if t_cost > 0 else 0
+    fmt = "{:,.0f}" if currency_type == "TWD" else "{:,.2f}"
+    color = "red" if t_profit > 0 else "green"
+    
+    st.markdown("<hr style='margin: 5px 0; border-top: 2px solid #666;'>", unsafe_allow_html=True)
+    c1, c2, c3, c4, c5, c6, c7, c8, c9 = st.columns(COLS_RATIO)
+    c1.markdown(f"**🔹 {currency_type} 小計**")
+    c5.markdown(f"**{fmt.format(t_cost)}**")
+    c6.markdown(f"**{fmt.format(t_val)}**")
+    c7.markdown(f":{color}[**{fmt.format(t_profit)}**]")
+    c8.markdown(f":{color}[**{roi:.2f}%**]")
+    st.markdown("<br>", unsafe_allow_html=True)
 
 # ==========================================
 # 4. 主程式邏輯
@@ -183,46 +201,53 @@ with tab1:
 
         # 看板
         t_val = portfolio["現值(TWD)"].sum()
-        t_profit = (portfolio["獲利(原幣)"] * portfolio["幣別"].apply(lambda x: 1 if x == "TWD" else usd_rate)).sum()
+        t_profit_twd = (portfolio["獲利(原幣)"] * portfolio["幣別"].apply(lambda x: 1 if x == "TWD" else usd_rate)).sum()
         c1, c2, c3 = st.columns(3)
         c1.metric("總資產 (TWD)", f"${t_val:,.0f}")
-        c2.metric("總獲利 (TWD)", f"${t_profit:,.0f}")
-        c3.metric("總報酬率", f"{(t_profit/(t_val-t_profit)*100):.2f}%" if t_val!=t_profit else "0%")
+        c2.metric("總獲利 (TWD)", f"${t_profit_twd:,.0f}")
+        c3.metric("總報酬率", f"{(t_profit_twd/(t_val-t_profit_twd)*100):.2f}%" if t_val!=t_profit_twd else "0%")
 
         st.divider()
 
-        # --- 新增：資產配置圓餅圖區塊 ---
+        # --- 配置圓餅圖與下拉選單 ---
         st.subheader("🎯 投資組合配置圖解")
         chart_col1, chart_col2 = st.columns(2)
         
         with chart_col1:
-            # 幣別分佈
             currency_dist = portfolio.groupby("幣別")["現值(TWD)"].sum().reset_index()
-            fig_cur = px.pie(currency_dist, values="現值(TWD)", names="幣別", 
-                             title="市場佔比 (台股 vs 美股)", hole=0.5,
-                             color_discrete_sequence=px.colors.qualitative.Pastel)
+            fig_cur = px.pie(currency_dist, values="現值(TWD)", names="幣別", title="市場資金比例 (TWD計價)", hole=0.5)
             st.plotly_chart(fig_cur, use_container_width=True)
 
         with chart_col2:
-            # 個股權重
-            fig_stock = px.pie(portfolio, values="現值(TWD)", names="股票代號", 
-                               title="個股資金權重 (集中度分析)", hole=0.5,
-                               color_discrete_sequence=px.colors.qualitative.Set3)
-            fig_stock.update_traces(textinfo='percent+label')
-            st.plotly_chart(fig_stock, use_container_width=True)
+            # 下拉選單切換組合分佈
+            view_option = st.selectbox("選擇配置視圖：", ["全部組合", "台股組合", "美股組合"], key="pie_view")
+            if view_option == "台股組合":
+                plot_df = portfolio[portfolio["幣別"] == "TWD"]
+            elif view_option == "美股組合":
+                plot_df = portfolio[portfolio["幣別"] == "USD"]
+            else:
+                plot_df = portfolio
+            
+            if not plot_df.empty:
+                fig_stock = px.pie(plot_df, values="現值(TWD)", names="股票代號", title=f"{view_option}分佈", hole=0.5)
+                fig_stock.update_traces(textinfo='percent+label')
+                st.plotly_chart(fig_stock, use_container_width=True)
+            else:
+                st.write("目前無相關持股可顯示圖表。")
 
         st.divider()
 
-        # 庫存表格
+        # --- 庫存清單與小計 ---
         for label, cur in [("🇹🇼 台股列表", "TWD"), ("🇺🇸 美股列表", "USD")]:
             sub = portfolio[portfolio["幣別"] == cur]
             if not sub.empty:
                 st.subheader(label)
                 display_headers(cur.lower(), current_user)
                 display_stock_rows(sub, cur, current_user)
+                # 這裡調用小計函數
+                display_subtotal_row(sub, cur)
 
 with tab2:
     if not df_record.empty:
         target = st.selectbox("分析標的", portfolio["股票代號"].tolist())
-        st.write(f"正在對 {target} 進行深度技術掃描...")
-        # 這裡可保留原本的 analyze_stock_technical 邏輯
+        st.write(f"正在分析 {target}...")
