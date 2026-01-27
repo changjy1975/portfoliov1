@@ -153,7 +153,8 @@ def display_stock_rows(df, currency_type, current_user):
             if c9.button("🗑️", key=f"del_{row['股票代號']}_{current_user}"):
                 remove_stock(row['股票代號'], current_user); st.rerun()
 
-def display_subtotal_row(df, currency_type):
+def display_subtotal_row(df, currency_type, usd_rate):
+    """計算並顯示特定幣別的小計列，若是美股則顯示換算台幣數據"""
     t_cost = df["總投入成本(原幣)"].sum()
     t_val = df["現值(原幣)"].sum()
     t_profit = df["獲利(原幣)"].sum()
@@ -168,6 +169,16 @@ def display_subtotal_row(df, currency_type):
     c6.markdown(f"**{fmt.format(t_val)}**")
     c7.markdown(f":{color}[**{fmt.format(t_profit)}**]")
     c8.markdown(f":{color}[**{roi:.2f}%**]")
+
+    # 若為美股，額外顯示一行台幣換算
+    if currency_type == "USD":
+        st.markdown("<div style='margin-top: -10px;'></div>", unsafe_allow_html=True) # 縮小行距
+        c1, c2, c3, c4, c5, c6, c7, c8, c9 = st.columns(COLS_RATIO)
+        c1.markdown("<span style='color: gray; font-size: 0.9em;'>└ 換算台幣 (TWD)</span>", unsafe_allow_html=True)
+        c5.markdown(f"<span style='color: gray; font-size: 0.9em;'>${(t_cost * usd_rate):,.0f}</span>", unsafe_allow_html=True)
+        c6.markdown(f"<span style='color: gray; font-size: 0.9em;'>${(t_val * usd_rate):,.0f}</span>", unsafe_allow_html=True)
+        c7.markdown(f"<span style='color: gray; font-size: 0.9em;'>${(t_profit * usd_rate):,.0f}</span>", unsafe_allow_html=True)
+    
     st.markdown("<br>", unsafe_allow_html=True)
 
 # ==========================================
@@ -232,7 +243,7 @@ with tab1:
         portfolio["獲利率(%)"] = (portfolio["獲利(原幣)"] / portfolio["總投入成本(原幣)"]) * 100
         portfolio["現值(TWD)"] = portfolio["現值(原幣)"] * portfolio["幣別"].apply(lambda x: 1 if x == "TWD" else usd_rate)
 
-        # 看板 (Dashboard) - 新增匯率顯示
+        # 看板 (Dashboard)
         t_val = portfolio["現值(TWD)"].sum()
         t_profit_twd = (portfolio["獲利(原幣)"] * portfolio["幣別"].apply(lambda x: 1 if x == "TWD" else usd_rate)).sum()
         
@@ -269,7 +280,8 @@ with tab1:
                 st.subheader(label)
                 display_headers(cur.lower(), current_user)
                 display_stock_rows(sub, cur, current_user)
-                display_subtotal_row(sub, cur)
+                # 這裡傳入 usd_rate 用於美股台幣換算
+                display_subtotal_row(sub, cur, usd_rate)
 
 with tab2:
     if not df_record.empty:
