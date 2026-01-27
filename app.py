@@ -18,11 +18,10 @@ if not os.path.exists(BACKUP_DIR):
     os.makedirs(BACKUP_DIR)
 
 # ==========================================
-# 2. 核心功能函數 (備份與資料處理)
+# 2. 核心功能函數
 # ==========================================
 
 def manage_backups(user, max_backups=10):
-    """只保留最近 10 份備份，避免佔用空間"""
     backups = sorted([
         os.path.join(BACKUP_DIR, f) for f in os.listdir(BACKUP_DIR) 
         if f.startswith(f"backup_{user}_")
@@ -31,7 +30,6 @@ def manage_backups(user, max_backups=10):
         os.remove(backups.pop(0))
 
 def create_backup(user):
-    """存檔前自動執行備份"""
     source_path = f"portfolio_{user}.csv"
     if os.path.exists(source_path):
         now = datetime.now(pytz.timezone('Asia/Taipei')).strftime("%Y%m%d_%H%M%S")
@@ -40,19 +38,16 @@ def create_backup(user):
         manage_backups(user)
 
 def load_data(user):
-    """載入特定使用者的資料"""
     path = f"portfolio_{user}.csv"
     if os.path.exists(path):
         return pd.read_csv(path)
     return pd.DataFrame(columns=["股票代號", "股數", "持有成本單價"])
 
 def save_data(df, user):
-    """儲存資料並自動觸發備份"""
     create_backup(user)
     df.to_csv(f"portfolio_{user}.csv", index=False)
 
 def remove_stock(symbol, user):
-    """從使用者檔案中移除特定股票"""
     df = load_data(user)
     df = df[df["股票代號"] != symbol]
     save_data(df, user)
@@ -89,7 +84,7 @@ def identify_currency(symbol):
     return "TWD" if (".TW" in symbol or ".TWO" in symbol) else "USD"
 
 # ==========================================
-# 3. 介面組件 (表格顯示與排序)
+# 3. 介面組件
 # ==========================================
 COLS_RATIO = [1.3, 0.9, 1, 1, 1.3, 1.3, 1.3, 1, 0.6]
 
@@ -115,18 +110,11 @@ def display_stock_rows(df, currency_type, current_user):
         c1, c2, c3, c4, c5, c6, c7, c8, c9 = st.columns(COLS_RATIO)
         fmt = "{:,.0f}" if currency_type == "TWD" else "{:,.2f}"
         color = "red" if row["獲利(原幣)"] > 0 else "green"
-        
         c1.write(f"**{row['股票代號']}**")
-        c2.write(f"{row['股數']:.2f}")
-        c3.write(f"{row['平均持有單價']:.2f}")
-        c4.write(f"{row['最新股價']:.2f}")
-        c5.write(fmt.format(row['總投入成本(原幣)']))
-        c6.write(fmt.format(row['現值(原幣)']))
-        c7.markdown(f":{color}[{fmt.format(row['獲利(原幣)'])}]")
-        c8.markdown(f":{color}[{row['獲利率(%)']:.2f}%]")
-        
-        if current_user == "All":
-            c9.write("🔒") # All 模式鎖定管理功能
+        c2.write(f"{row['股數']:.2f}"); c3.write(f"{row['平均持有單價']:.2f}"); c4.write(f"{row['最新股價']:.2f}")
+        c5.write(fmt.format(row['總投入成本(原幣)'])); c6.write(fmt.format(row['現值(原幣)']))
+        c7.markdown(f":{color}[{fmt.format(row['獲利(原幣)'])}]"); c8.markdown(f":{color}[{row['獲利率(%)']:.2f}%]")
+        if current_user == "All": c9.write("🔒")
         else:
             if c9.button("🗑️", key=f"del_{row['股票代號']}_{current_user}"):
                 remove_stock(row['股票代號'], current_user); st.rerun()
@@ -134,110 +122,99 @@ def display_stock_rows(df, currency_type, current_user):
 # ==========================================
 # 4. 主程式邏輯
 # ==========================================
-
-# 初始化排序狀態
 if "sort_col" not in st.session_state: st.session_state.sort_col = "獲利(原幣)"
 if "sort_asc" not in st.session_state: st.session_state.sort_asc = False
 if "last_updated" not in st.session_state: st.session_state.last_updated = "尚未更新"
 
-# 側邊欄：帳戶切換
 with st.sidebar:
     st.title("👨‍👩‍👧 帳戶管理")
     current_user = st.selectbox("切換使用者：", ["Alan", "Jenny", "All"])
-    
     if current_user != "All":
-        st.info(f"當前操作：{current_user}")
-    else:
-        st.success("📊 模式：Alan + Jenny 加總總覽")
+        st.subheader(f"📝 新增 {current_user} 持股")
+        with st.form("add_form"):
+            s_in = st.text_input("股票代號", "2330.TW").upper().strip()
+            q_in = st.number_input("股數", min_value=0.0, value=100.0)
+            c_in = st.number_input("成本單價", min_value=0.0, value=600.0)
+            if st.form_submit_button("新增並備份"):
+                df = load_data(current_user)
+                save_data(pd.concat([df, pd.DataFrame([{"股票代號":s_in,"股數":q_in,"持有成本單價":c_in}])], ignore_index=True), current_user)
+                st.rerun()
+        if st.button(f"🚨 清空 {current_user}"):
+            if os.path.exists(f"portfolio_{current_user}.csv"):
+                create_backup(current_user); os.remove(f"portfolio_{current_user}.csv"); st.rerun()
 
-# 資料載入邏輯
+# 資料載入
 if current_user == "All":
-    df_alan = load_data("Alan")
-    df_jenny = load_data("Jenny")
-    df_record = pd.concat([df_alan, df_jenny], ignore_index=True)
+    df_record = pd.concat([load_data("Alan"), load_data("Jenny")], ignore_index=True)
 else:
     df_record = load_data(current_user)
 
 st.title(f"📈 {current_user} 投資組合戰情室")
-
-# 頂部操作
-col_ref, col_info = st.columns([1, 5])
-if col_ref.button("🔄 刷新全部"):
+if st.button("🔄 刷新即時行情"):
     st.session_state.last_updated = datetime.now(pytz.timezone('Asia/Taipei')).strftime("%Y-%m-%d %H:%M:%S")
     st.rerun()
-col_info.markdown(f"<div style='padding-top:10px; color:gray;'>最後更新: {st.session_state.last_updated}</div>", unsafe_allow_html=True)
 
-tab1, tab2, tab3 = st.tabs(["📊 庫存列表", "🧠 AI 持股健診", "⚖️ 資產配置分析"])
+tab1, tab2 = st.tabs(["📊 庫存與配置分析", "🧠 AI 技術健診"])
 
 with tab1:
-    if current_user != "All":
-        with st.sidebar:
-            st.divider()
-            st.subheader(f"📝 新增 {current_user} 的投資")
-            with st.form("add_stock_form"):
-                s_in = st.text_input("股票代號", "2330.TW").upper().strip()
-                q_in = st.number_input("股數", min_value=0.0, value=100.0)
-                c_in = st.number_input("成本單價", min_value=0.0, value=600.0)
-                if st.form_submit_button("執行新增並備份"):
-                    df = load_data(current_user)
-                    new_row = pd.DataFrame([{"股票代號": s_in, "股數": q_in, "持有成本單價": c_in}])
-                    save_data(pd.concat([df, new_row], ignore_index=True), current_user)
-                    st.toast(f"✅ 已存檔，備份已建立於 {BACKUP_DIR}")
-                    st.rerun()
-            if st.button(f"🚨 清空 {current_user} 資料"):
-                if os.path.exists(f"portfolio_{current_user}.csv"):
-                    create_backup(current_user) # 刪除前也存一份
-                    os.remove(f"portfolio_{current_user}.csv")
-                    st.rerun()
-
     if df_record.empty:
-        st.info("尚無投資數據，請先從側邊欄新增。")
+        st.info("尚無數據。")
     else:
+        # 計算邏輯
         usd_rate = get_exchange_rate()
         df_record['幣別'] = df_record['股票代號'].apply(identify_currency)
         
-        # --- 核心聚合計算 (解決 KeyError 且支援加總) ---
-        # 相同股票合併時，需要計算「加權平均成本」
-        def weighted_avg(group):
-            total_qty = group['股數'].sum()
-            if total_qty == 0: return 0
-            avg_cost = (group['股數'] * group['持有成本單價']).sum() / total_qty
-            return pd.Series({'股數': total_qty, '平均持有單價': avg_cost})
-
+        # 加權平均計算
+        def weighted_avg(g):
+            t_q = g['股數'].sum()
+            avg_c = (g['股數'] * g['持有成本單價']).sum() / t_q if t_q > 0 else 0
+            return pd.Series({'股數': t_q, '平均持有單價': avg_c})
+        
         portfolio = df_record.groupby(["股票代號", "幣別"]).apply(weighted_avg, include_groups=False).reset_index()
-        
-        # 獲取價格與計算盈虧
-        unique_symbols = portfolio["股票代號"].tolist()
-        with st.spinner('獲取即時報價中...'):
-            current_prices = get_current_prices(unique_symbols)
-        
-        portfolio["最新股價"] = portfolio["股票代號"].map(current_prices)
+        prices = get_current_prices(portfolio["股票代號"].tolist())
+        portfolio["最新股價"] = portfolio["股票代號"].map(prices)
         portfolio = portfolio.dropna(subset=["最新股價"])
         
         portfolio["總投入成本(原幣)"] = portfolio["股數"] * portfolio["平均持有單價"]
         portfolio["現值(原幣)"] = portfolio["股數"] * portfolio["最新股價"]
         portfolio["獲利(原幣)"] = portfolio["現值(原幣)"] - portfolio["總投入成本(原幣)"]
         portfolio["獲利率(%)"] = (portfolio["獲利(原幣)"] / portfolio["總投入成本(原幣)"]) * 100
-        
-        # 匯率換算
-        portfolio["匯率因子"] = portfolio["幣別"].apply(lambda x: 1 if x == "TWD" else usd_rate)
-        portfolio["現值(TWD)"] = portfolio["現值(原幣)"] * portfolio["匯率因子"]
-        portfolio["獲利(TWD)"] = portfolio["獲利(原幣)"] * portfolio["匯率因子"]
+        portfolio["現值(TWD)"] = portfolio["現值(原幣)"] * portfolio["幣別"].apply(lambda x: 1 if x == "TWD" else usd_rate)
 
-        # 看板顯示
+        # 看板
         t_val = portfolio["現值(TWD)"].sum()
-        t_profit = portfolio["獲利(TWD)"].sum()
-        t_roi = (t_profit / (t_val - t_profit) * 100) if (t_val - t_profit) != 0 else 0
-        
+        t_profit = (portfolio["獲利(原幣)"] * portfolio["幣別"].apply(lambda x: 1 if x == "TWD" else usd_rate)).sum()
         c1, c2, c3 = st.columns(3)
-        c1.metric(f"💰 {current_user} 總資產 (TWD)", f"${t_val:,.0f}")
-        c2.metric("📈 總獲利 (TWD)", f"${t_profit:,.0f}")
-        c3.metric("📊 總報酬率", f"{t_roi:.2f}%")
+        c1.metric("總資產 (TWD)", f"${t_val:,.0f}")
+        c2.metric("總獲利 (TWD)", f"${t_profit:,.0f}")
+        c3.metric("總報酬率", f"{(t_profit/(t_val-t_profit)*100):.2f}%" if t_val!=t_profit else "0%")
+
+        st.divider()
+
+        # --- 新增：資產配置圓餅圖區塊 ---
+        st.subheader("🎯 投資組合配置圖解")
+        chart_col1, chart_col2 = st.columns(2)
+        
+        with chart_col1:
+            # 幣別分佈
+            currency_dist = portfolio.groupby("幣別")["現值(TWD)"].sum().reset_index()
+            fig_cur = px.pie(currency_dist, values="現值(TWD)", names="幣別", 
+                             title="市場佔比 (台股 vs 美股)", hole=0.5,
+                             color_discrete_sequence=px.colors.qualitative.Pastel)
+            st.plotly_chart(fig_cur, use_container_width=True)
+
+        with chart_col2:
+            # 個股權重
+            fig_stock = px.pie(portfolio, values="現值(TWD)", names="股票代號", 
+                               title="個股資金權重 (集中度分析)", hole=0.5,
+                               color_discrete_sequence=px.colors.qualitative.Set3)
+            fig_stock.update_traces(textinfo='percent+label')
+            st.plotly_chart(fig_stock, use_container_width=True)
 
         st.divider()
 
         # 庫存表格
-        for label, cur in [("🇹🇼 台股持倉", "TWD"), ("🇺🇸 美股持倉", "USD")]:
+        for label, cur in [("🇹🇼 台股列表", "TWD"), ("🇺🇸 美股列表", "USD")]:
             sub = portfolio[portfolio["幣別"] == cur]
             if not sub.empty:
                 st.subheader(label)
@@ -246,20 +223,6 @@ with tab1:
 
 with tab2:
     if not df_record.empty:
-        st.subheader("💡 系統操作建議")
-        target = st.selectbox("選擇分析標的：", portfolio["股票代號"].tolist(), key="tech_sel")
-        if target:
-            # 這裡簡單呈現 (實際 analyze_stock_technical 可參考先前定義)
-            st.write(f"正在對 {target} 進行技術指標掃描...")
-            st.info("提示：此部分會抓取 Yahoo Finance 近半年週線數據進行 RSI 與 MA 分析。")
-
-with tab3:
-    if not df_record.empty:
-        st.subheader("🥧 資產權重分佈")
-        col_c1, col_c2 = st.columns(2)
-        with col_c1:
-            fig1 = px.pie(portfolio, values="現值(TWD)", names="幣別", title="幣別佔比", hole=0.4)
-            st.plotly_chart(fig1, use_container_width=True)
-        with col_c2:
-            fig2 = px.pie(portfolio, values="現值(TWD)", names="股票代號", title="個股佔比 (TWD 換算)", hole=0.4)
-            st.plotly_chart(fig2, use_container_width=True)
+        target = st.selectbox("分析標的", portfolio["股票代號"].tolist())
+        st.write(f"正在對 {target} 進行深度技術掃描...")
+        # 這裡可保留原本的 analyze_stock_technical 邏輯
