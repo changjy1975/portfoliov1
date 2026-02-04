@@ -225,8 +225,27 @@ if not df_record.empty:
         # B. 圓餅圖配置 (置頂)
         st.divider(); st.subheader("🎯 投資組合配置分析")
         pc1, pc2 = st.columns(2)
-        with pc1: st.plotly_chart(px.pie(portfolio, values="現值_TWD", names="幣別", title="市場配置 (TWD)", hole=0.45), use_container_width=True)
-        with pc2: st.plotly_chart(px.pie(portfolio, values="現值_TWD", names="股票代號", title="個股配置 (TWD)", hole=0.45), use_container_width=True)
+        with pc1: 
+            st.plotly_chart(px.pie(portfolio, values="現值_TWD", names="幣別", title="市場配置 (TWD)", hole=0.45), use_container_width=True)
+        
+        with pc2:
+            # --- 新增的個股過濾下拉選單 ---
+            view_mode = st.selectbox("選擇個股配置範圍：", ["全部", "台股", "美股"], key="pie_filter")
+            
+            if view_mode == "台股":
+                chart_df = portfolio[portfolio["幣別"] == "TWD"]
+                chart_title = "個股配置 (台股)"
+            elif view_mode == "美股":
+                chart_df = portfolio[portfolio["幣別"] == "USD"]
+                chart_title = "個股配置 (美股)"
+            else:
+                chart_df = portfolio
+                chart_title = "個股配置 (全部)"
+
+            if not chart_df.empty:
+                st.plotly_chart(px.pie(chart_df, values="現值_TWD", names="股票代號", title=f"{chart_title} (TWD)", hole=0.45), use_container_width=True)
+            else:
+                st.info(f"目前沒有 {view_mode} 的持股資料。")
 
         # C. 庫存列表 (置底)
         st.divider()
